@@ -56,7 +56,7 @@ function pickWarehouse(units: Units, prefix: string, { warehouses, zones }: Data
 
 function canTake(warehouse: Warehouse, units: Units): boolean {
   if (!warehouse.enabled) return false;
-  return [...units].every(([sku, quantity]) => warehouse.inventory[sku].available >= quantity);
+  return [...units].every(([sku, quantity]) => (warehouse.inventory[sku]?.available ?? 0) >= quantity);
 }
 
 function daysOfCover(warehouse: Warehouse, units: Units): number {

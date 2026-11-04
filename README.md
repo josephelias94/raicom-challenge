@@ -53,7 +53,7 @@ Days of cover uses available stock before the order reserves its own units.
 
 **No input validation.** I skipped it on purpose, because the brief says rough is fine and it keeps the code smaller to review. None of these cases occurs in this data, but a bad file would behave like this:
 
-- **Crashes with a generic `TypeError`:** an unknown SKU, an edit for an order that doesn't exist, a warehouse missing from `zones.json`, or an order with no `shipTo`.
+- **Crashes with a generic `TypeError`:** an edit for an order that doesn't exist, a warehouse missing from `zones.json`, or an order with no `shipTo`. A crash prints nothing, so all routes are lost.
 - **No error, possibly wrong result:**
   - A duplicate order number drops the first order.
   - An unknown event type, such as a cancellation, is ignored.
@@ -67,9 +67,11 @@ Days of cover uses available stock before the order reserves its own units.
 
 If this ran in production, I'd add one validation step that throws a specific error before any order is routed.
 
-**Unknown SKUs.** Read literally, rules 3 and 7 send an unknown SKU to PARTNER, because no warehouse has stock of it. The script crashes instead, so a data error can't ship unnoticed.
+**Unknown SKUs.** A SKU missing from a warehouse counts as 0 stock (rule 3). If no warehouse can take the order, it goes to PARTNER (rule 7), so a truly unknown product shows up only as the generic reason `no warehouse can take order`.
 
-**30-minute edit window.** It isn't enforced, so an edit is merged whenever it arrives. The only edit in this data came 18 minutes after its order.
+**Edits.** The router treats `orders.json` as final. At the file's last event (14:15:37), ten orders (#2047–#2056) are still inside their 30-minute edit window, so a later edit to one of them would be missed. The window also isn't enforced: a late edit is merged with the normal note and no lateness flag. The only edit in this data came 18 minutes after its order.
+
+**Zero velocity.** WH-TX is the only warehouse with zero velocity, and it's disabled, so this doesn't happen today. If it were enabled, it would get infinite cover and win zone ties, such as #2034 and #2048. That's an undefined side effect, not a decision.
 
 **Rules this data never reaches.** Rule 6, rule 7, and the "smallest" part of rule 5 are covered only by unit tests with synthetic orders.
 

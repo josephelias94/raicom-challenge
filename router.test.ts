@@ -1,5 +1,6 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { loadData, routeAll } from "./router.ts";
 import type { Line, OrderCreated, OrderEdited, OrderEvent, Warehouse } from "./types.ts";
 
@@ -47,7 +48,7 @@ function run(warehouses: Warehouse[], events: OrderEvent[]): string[] {
 
 const single = (warehouses: Warehouse[], order: OrderCreated) => run(warehouses, [order])[0];
 
-test("real data: all 26 orders match the hand-derived routes", () => {
+test("real data: all 26 orders match the expected routes", () => {
   const expected = [
     "#2031 WH-NJ zone 1",
     "#2032 WH-GA zone 1",
@@ -80,7 +81,12 @@ test("real data: all 26 orders match the hand-derived routes", () => {
   assert.deepEqual(routes, expected);
 });
 
-test("real data: stock left after all orders matches the hand-derived totals", () => {
+test("real data: a fresh run matches routes.txt byte for byte", () => {
+  const fresh = Buffer.from(routeAll(loadData()).join("\n") + "\n");
+  assert.deepEqual(fresh, readFileSync("routes.txt"));
+});
+
+test("real data: stock left after all orders matches the expected totals", () => {
   const data = loadData();
   routeAll(data);
   const left = Object.fromEntries(
@@ -170,6 +176,19 @@ test("rule 3: an order is never split across warehouses", () => {
   );
   assert.equal(wh[0].inventory[VITD].available, 10);
   assert.equal(wh[1].inventory[MAG].available, 10);
+});
+
+test("rule 3: a SKU missing from one warehouse counts as 0 stock, so another ships it", () => {
+  const wh = [warehouse("WH-NV", { [MAG]: 10 }), warehouse("WH-GA", { [VITD]: 10 })];
+  assert.equal(single(wh, created("#1", [line(VITD)], { zip: "33301" })), "#1 WH-GA zone 2");
+});
+
+test("rule 7: a SKU missing from every warehouse goes to PARTNER", () => {
+  const wh = [warehouse("WH-NJ", { [VITD]: 10 }), warehouse("WH-GA", { [VITD]: 10 })];
+  assert.equal(
+    single(wh, created("#1", [line("NW-NOPE")])),
+    "#1 PARTNER no warehouse can take order",
+  );
 });
 
 test("rule 4: the lowest zone wins regardless of cover and file order", () => {
