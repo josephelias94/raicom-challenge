@@ -10,7 +10,7 @@ const BUNDLE = "NW-BNDL-ESS";
 
 const line = (sku: string, quantity = 1): Line => ({ sku, quantity });
 
-// Prefix 111 ties all four warehouses. Prefix 333 is closest at WH-NV.
+// Prefix 111 ties all four warehouses. Prefix 333 is closest at WH-NV. Prefix 021 is closest at WH-NJ.
 const ZONES = {
   "WH-NJ": { "111": 1, "333": 3, "021": 3 },
   "WH-GA": { "111": 1, "333": 2, "021": 6 },
@@ -97,11 +97,16 @@ test("real data: stock left after all orders matches the hand-derived totals", (
   });
 });
 
-test("real data: every normalized order is reported on its line", () => {
-  const noted = routeAll(loadData())
-    .filter((l) => l.includes("("))
-    .map((l) => l.split(" ")[0]);
-  assert.deepEqual(noted, ["#2033", "#2039", "#2040", "#2041", "#2045", "#2056"]);
+test("real data: exactly these six orders carry these notes", () => {
+  const noted = routeAll(loadData()).filter((l) => l.includes("("));
+  assert.deepEqual(noted, [
+    "#2033 WH-NJ zone 3 (normalized ZIP 2134 -> 02134)",
+    "#2039 WH-NJ zone 1 (normalized ZIP 07030-1834 -> prefix 070)",
+    "#2040 WH-GA zone 5 (expanded bundle NW-BNDL-ESS)",
+    "#2041 WH-GA zone 7 (merged edit: added NW-MULTI-30 x1)",
+    "#2045 WH-GA zone 3 (normalized SKU nw-mag-90 -> NW-MAG-90)",
+    "#2056 WH-GA zone 5 (expanded bundle NW-BNDL-ESS)",
+  ]);
 });
 
 test("rule 1: a non-US order goes to PARTNER even with a ZIP in zones", () => {
@@ -234,7 +239,7 @@ test("a routed order reserves its stock for later orders", () => {
   assert.equal(wh[1].inventory[VITD].available, 9);
 });
 
-test("PARTNER orders reserve no warehouse stock", () => {
+test("a non-US PARTNER order reserves no stock", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 1 })];
   const orders = [
     created("#1", [line(VITD)], { country: "CA", minute: 0 }),
