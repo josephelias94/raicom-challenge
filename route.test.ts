@@ -1,6 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
-import { loadData, routeAll, type Data, type Line, type Warehouse } from "./route.ts";
+import { loadData, routeAll } from "./router.ts";
+import type { Line, OrderCreated, OrderEdited, OrderEvent, Warehouse } from "./types.ts";
 
 const VITD = "NW-VITD-60";
 const MULTI = "NW-MULTI-30";
@@ -11,10 +12,10 @@ const line = (sku: string, quantity = 1): Line => ({ sku, quantity });
 
 // Prefix 111 ties all four warehouses. Prefix 333 is closest at WH-NV.
 const ZONES = {
-  "WH-NJ": { "111": 1, "333": 3 },
-  "WH-GA": { "111": 1, "333": 2 },
-  "WH-NV": { "111": 1, "333": 1 },
-  "WH-TX": { "111": 1, "333": 4 },
+  "WH-NJ": { "111": 1, "333": 3, "021": 3 },
+  "WH-GA": { "111": 1, "333": 2, "021": 6 },
+  "WH-NV": { "111": 1, "333": 1, "021": 8 },
+  "WH-TX": { "111": 1, "333": 4, "021": 7 },
 };
 
 function warehouse(code: string, available: Record<string, number>, enabled = true): Warehouse {
@@ -24,22 +25,27 @@ function warehouse(code: string, available: Record<string, number>, enabled = tr
   return { code, enabled, inventory };
 }
 
-function created(orderNumber: string, lines: Line[], zip: string | number | undefined = "11101", country = "US", minute = 0) {
+type OrderOptions = { zip?: string | number; country?: string; minute?: number };
+
+function created(
+  orderNumber: string,
+  lines: Line[],
+  { zip = "11101", country = "US", minute = 0 }: OrderOptions = {},
+): OrderCreated {
   const at = `2026-10-20T13:${String(minute).padStart(2, "0")}:00.000Z`;
   return { type: "order_created", orderNumber, at, shipTo: { country, zip }, lines };
 }
 
-function run(warehouses: Warehouse[], events: any[]): string[] {
-  const data: Data = {
-    events,
-    warehouses,
-    zones: ZONES,
-    bundles: [{ sku: BUNDLE, components: [line(VITD), line(MAG)] }],
-  };
-  return routeAll(data);
+function edited(orderNumber: string, addedLines: Line[]): OrderEdited {
+  return { type: "order_edited", orderNumber, at: "2026-10-20T13:18:00.000Z", addedLines };
 }
 
-const single = (warehouses: Warehouse[], order: any) => run(warehouses, [order])[0];
+function run(warehouses: Warehouse[], events: OrderEvent[]): string[] {
+  const bundles = [{ sku: BUNDLE, components: [line(VITD), line(MAG)] }];
+  return routeAll({ events, warehouses, zones: ZONES, bundles });
+}
+
+const single = (warehouses: Warehouse[], order: OrderCreated) => run(warehouses, [order])[0];
 
 test("real data: all 26 orders match the hand-derived routes", () => {
   const expected = [
@@ -92,66 +98,69 @@ test("real data: stock left after all orders matches the hand-derived totals", (
 });
 
 test("real data: every normalized order is reported on its line", () => {
-  const routes = routeAll(loadData());
-  const noted = routes.filter((l) => l.includes("(")).map((l) => l.split(" ")[0]);
+  const noted = routeAll(loadData())
+    .filter((l) => l.includes("("))
+    .map((l) => l.split(" ")[0]);
   assert.deepEqual(noted, ["#2033", "#2039", "#2040", "#2041", "#2045", "#2056"]);
 });
 
 test("rule 1: a non-US order goes to PARTNER even with a ZIP in zones", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 10 })];
-  assert.equal(single(wh, created("#1", [line(VITD)], "11101", "CA")), "#1 PARTNER outside US");
+  assert.equal(single(wh, created("#1", [line(VITD)], { country: "CA" })), "#1 PARTNER outside US");
 });
 
 test("rule 2: an empty or missing ZIP goes to PARTNER", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 10 })];
-  assert.equal(single(wh, created("#1", [line(VITD)], "")), "#1 PARTNER no ZIP");
+  assert.equal(single(wh, created("#1", [line(VITD)], { zip: "" })), "#1 PARTNER no ZIP");
+
   const noZip = { ...created("#2", [line(VITD)]), shipTo: { country: "US" } };
   assert.equal(single(wh, noZip), "#2 PARTNER no ZIP");
 });
 
 test("rule 2: a prefix not in zones goes to PARTNER", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 10 })];
-  assert.equal(single(wh, created("#1", [line(VITD)], "99999")), "#1 PARTNER ZIP prefix 999 not in zones");
+  assert.equal(
+    single(wh, created("#1", [line(VITD)], { zip: "99999" })),
+    "#1 PARTNER ZIP prefix 999 not in zones",
+  );
 });
 
 test("ZIP: a numeric ZIP is padded, and the normalization is reported", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 10 })];
-  const result = single(wh, { ...created("#1", [line(VITD)]), shipTo: { country: "US", zip: 11101 } });
-  assert.equal(result, "#1 WH-NJ zone 1 (normalized ZIP 11101 -> 11101)");
-  const zones = { ...ZONES, "WH-NJ": { ...ZONES["WH-NJ"], "021": 3 } };
-  const data: Data = {
-    events: [created("#2", [line(VITD)], 2134)],
-    warehouses: [warehouse("WH-NJ", { [VITD]: 10 })],
-    zones,
-    bundles: [],
-  };
-  assert.deepEqual(routeAll(data), ["#2 WH-NJ zone 3 (normalized ZIP 2134 -> 02134)"]);
+  assert.equal(
+    single(wh, created("#1", [line(VITD)], { zip: 2134 })),
+    "#1 WH-NJ zone 3 (normalized ZIP 2134 -> 02134)",
+  );
 });
 
 test("ZIP: ZIP+4 uses the first three digits and is reported", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 10 })];
   assert.equal(
-    single(wh, created("#1", [line(VITD)], "11101-1834")),
+    single(wh, created("#1", [line(VITD)], { zip: "11101-1834" })),
     "#1 WH-NJ zone 1 (normalized ZIP 11101-1834 -> prefix 111)",
   );
 });
 
 test("rule 3: a disabled warehouse is skipped even when it is closest", () => {
   const wh = [warehouse("WH-NV", { [VITD]: 10 }, false), warehouse("WH-GA", { [VITD]: 10 })];
-  assert.equal(single(wh, created("#1", [line(VITD)], "33301")), "#1 WH-GA zone 2");
+  assert.equal(single(wh, created("#1", [line(VITD)], { zip: "33301" })), "#1 WH-GA zone 2");
 });
 
 test("rule 3: a warehouse short on stock is skipped, and exact stock is enough", () => {
   const short = [warehouse("WH-NV", { [VITD]: 1 }), warehouse("WH-GA", { [VITD]: 10 })];
-  assert.equal(single(short, created("#1", [line(VITD, 2)], "33301")), "#1 WH-GA zone 2");
+  assert.equal(single(short, created("#1", [line(VITD, 2)], { zip: "33301" })), "#1 WH-GA zone 2");
+
   const exact = [warehouse("WH-NV", { [VITD]: 2 }), warehouse("WH-GA", { [VITD]: 10 })];
-  assert.equal(single(exact, created("#2", [line(VITD, 2)], "33301")), "#2 WH-NV zone 1");
+  assert.equal(single(exact, created("#2", [line(VITD, 2)], { zip: "33301" })), "#2 WH-NV zone 1");
 });
 
 test("rule 3: an order is never split across warehouses", () => {
-  const wh = [warehouse("WH-NV", { [VITD]: 10, [MAG]: 0 }), warehouse("WH-GA", { [VITD]: 0, [MAG]: 10 })];
+  const wh = [
+    warehouse("WH-NV", { [VITD]: 10, [MAG]: 0 }),
+    warehouse("WH-GA", { [VITD]: 0, [MAG]: 10 }),
+  ];
   assert.equal(
-    single(wh, created("#1", [line(VITD), line(MAG)], "33301")),
+    single(wh, created("#1", [line(VITD), line(MAG)], { zip: "33301" })),
     "#1 PARTNER no warehouse can take order",
   );
   assert.equal(wh[0].inventory[VITD].available, 10);
@@ -159,8 +168,12 @@ test("rule 3: an order is never split across warehouses", () => {
 });
 
 test("rule 4: the lowest zone wins regardless of cover and file order", () => {
-  const wh = [warehouse("WH-NJ", { [VITD]: 500 }), warehouse("WH-GA", { [VITD]: 400 }), warehouse("WH-NV", { [VITD]: 1 })];
-  assert.equal(single(wh, created("#1", [line(VITD)], "33301")), "#1 WH-NV zone 1");
+  const wh = [
+    warehouse("WH-NJ", { [VITD]: 500 }),
+    warehouse("WH-GA", { [VITD]: 400 }),
+    warehouse("WH-NV", { [VITD]: 1 }),
+  ];
+  assert.equal(single(wh, created("#1", [line(VITD)], { zip: "33301" })), "#1 WH-NV zone 1");
 });
 
 test("rule 5: a zone tie goes to the most days of cover over priority", () => {
@@ -169,7 +182,10 @@ test("rule 5: a zone tie goes to the most days of cover over priority", () => {
 });
 
 test("rule 5: an order's cover is its smallest product cover", () => {
-  const wh = [warehouse("WH-NJ", { [VITD]: 100, [MAG]: 20 }), warehouse("WH-GA", { [VITD]: 50, [MAG]: 50 })];
+  const wh = [
+    warehouse("WH-NJ", { [VITD]: 100, [MAG]: 20 }),
+    warehouse("WH-GA", { [VITD]: 50, [MAG]: 50 }),
+  ];
   assert.equal(single(wh, created("#1", [line(VITD), line(MAG)])), "#1 WH-GA zone 1");
 });
 
@@ -182,29 +198,37 @@ test("rule 5: cover uses available stock before reserving this order", () => {
 });
 
 test("rule 6: a full tie follows WH-NJ, WH-GA, WH-NV, WH-TX, not file order", () => {
-  const all = ["WH-TX", "WH-NV", "WH-GA", "WH-NJ"];
-  const inOrder = ["WH-NJ", "WH-GA", "WH-NV", "WH-TX"];
-  inOrder.forEach((winner, i) => {
-    const wh = all.filter((c) => inOrder.indexOf(c) >= i).map((c) => warehouse(c, { [VITD]: 10 }));
+  const reversed = ["WH-TX", "WH-NV", "WH-GA", "WH-NJ"];
+  const priority = ["WH-NJ", "WH-GA", "WH-NV", "WH-TX"];
+  priority.forEach((winner, i) => {
+    const wh = reversed
+      .filter((code) => priority.indexOf(code) >= i)
+      .map((code) => warehouse(code, { [VITD]: 10 }));
     assert.equal(single(wh, created("#1", [line(VITD)])), `#1 ${winner} zone 1`);
   });
 });
 
 test("rule 7: no eligible warehouse goes to PARTNER", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 1 })];
-  assert.equal(single(wh, created("#1", [line(VITD, 2)])), "#1 PARTNER no warehouse can take order");
+  assert.equal(
+    single(wh, created("#1", [line(VITD, 2)])),
+    "#1 PARTNER no warehouse can take order",
+  );
 });
 
 test("orders route by creation time, not file order", () => {
   const wh = [warehouse("WH-NV", { [VITD]: 1 }), warehouse("WH-GA", { [VITD]: 10 })];
-  const late = created("#late", [line(VITD)], "33301", "US", 30);
-  const early = created("#early", [line(VITD)], "33301", "US", 10);
+  const late = created("#late", [line(VITD)], { zip: "33301", minute: 30 });
+  const early = created("#early", [line(VITD)], { zip: "33301", minute: 10 });
   assert.deepEqual(run(wh, [late, early]), ["#early WH-NV zone 1", "#late WH-GA zone 2"]);
 });
 
 test("a routed order reserves its stock for later orders", () => {
   const wh = [warehouse("WH-NV", { [VITD]: 1 }), warehouse("WH-GA", { [VITD]: 10 })];
-  const orders = [created("#1", [line(VITD)], "33301", "US", 0), created("#2", [line(VITD)], "33301", "US", 1)];
+  const orders = [
+    created("#1", [line(VITD)], { zip: "33301", minute: 0 }),
+    created("#2", [line(VITD)], { zip: "33301", minute: 1 }),
+  ];
   assert.deepEqual(run(wh, orders), ["#1 WH-NV zone 1", "#2 WH-GA zone 2"]);
   assert.equal(wh[0].inventory[VITD].available, 0);
   assert.equal(wh[1].inventory[VITD].available, 9);
@@ -212,25 +236,31 @@ test("a routed order reserves its stock for later orders", () => {
 
 test("PARTNER orders reserve no warehouse stock", () => {
   const wh = [warehouse("WH-NJ", { [VITD]: 1 })];
-  const orders = [created("#1", [line(VITD)], "11101", "CA", 0), created("#2", [line(VITD)], "11101", "US", 1)];
+  const orders = [
+    created("#1", [line(VITD)], { country: "CA", minute: 0 }),
+    created("#2", [line(VITD)], { minute: 1 }),
+  ];
   assert.deepEqual(run(wh, orders), ["#1 PARTNER outside US", "#2 WH-NJ zone 1"]);
 });
 
 test("an edit is merged before routing, and the order routes once", () => {
-  const wh = [warehouse("WH-NV", { [VITD]: 10, [MULTI]: 0 }), warehouse("WH-GA", { [VITD]: 10, [MULTI]: 10 })];
-  const edit = { type: "order_edited", orderNumber: "#1", at: "2026-10-20T13:18:00.000Z", addedLines: [line(MULTI)] };
-  assert.deepEqual(run(wh, [created("#1", [line(VITD)], "33301"), edit]), [
-    `#1 WH-GA zone 2 (merged edit: added ${MULTI} x1)`,
-  ]);
+  const wh = [
+    warehouse("WH-NV", { [VITD]: 10, [MULTI]: 0 }),
+    warehouse("WH-GA", { [VITD]: 10, [MULTI]: 10 }),
+  ];
+  const events = [created("#1", [line(VITD)], { zip: "33301" }), edited("#1", [line(MULTI)])];
+  assert.deepEqual(run(wh, events), [`#1 WH-GA zone 2 (merged edit: added ${MULTI} x1)`]);
 });
 
 test("an edited order keeps its creation position in the queue", () => {
-  const wh = [warehouse("WH-NV", { [VITD]: 1, [MULTI]: 1 }), warehouse("WH-GA", { [VITD]: 10, [MULTI]: 10 })];
-  const edit = { type: "order_edited", orderNumber: "#1", at: "2026-10-20T13:18:00.000Z", addedLines: [line(MULTI)] };
+  const wh = [
+    warehouse("WH-NV", { [VITD]: 1, [MULTI]: 1 }),
+    warehouse("WH-GA", { [VITD]: 10, [MULTI]: 10 }),
+  ];
   const events = [
-    created("#1", [line(VITD)], "33301", "US", 0),
-    created("#2", [line(VITD)], "33301", "US", 10),
-    edit,
+    created("#1", [line(VITD)], { zip: "33301", minute: 0 }),
+    created("#2", [line(VITD)], { zip: "33301", minute: 10 }),
+    edited("#1", [line(MULTI)]),
   ];
   assert.deepEqual(run(wh, events), [
     `#1 WH-NV zone 1 (merged edit: added ${MULTI} x1)`,
@@ -240,16 +270,17 @@ test("an edited order keeps its creation position in the queue", () => {
 
 test("the same SKU from an edit is summed before checking stock", () => {
   const wh = [warehouse("WH-NV", { [VITD]: 1 }), warehouse("WH-GA", { [VITD]: 10 })];
-  const edit = { type: "order_edited", orderNumber: "#1", at: "2026-10-20T13:18:00.000Z", addedLines: [line(VITD)] };
-  assert.deepEqual(run(wh, [created("#1", [line(VITD)], "33301"), edit]), [
-    `#1 WH-GA zone 2 (merged edit: added ${VITD} x1)`,
-  ]);
+  const events = [created("#1", [line(VITD)], { zip: "33301" }), edited("#1", [line(VITD)])];
+  assert.deepEqual(run(wh, events), [`#1 WH-GA zone 2 (merged edit: added ${VITD} x1)`]);
 });
 
 test("a bundle expands into components, multiplied by quantity, and is reported", () => {
-  const wh = [warehouse("WH-NV", { [VITD]: 1, [MAG]: 1 }), warehouse("WH-GA", { [VITD]: 10, [MAG]: 10 })];
+  const wh = [
+    warehouse("WH-NV", { [VITD]: 1, [MAG]: 1 }),
+    warehouse("WH-GA", { [VITD]: 10, [MAG]: 10 }),
+  ];
   assert.equal(
-    single(wh, created("#1", [line(BUNDLE, 2)], "33301")),
+    single(wh, created("#1", [line(BUNDLE, 2)], { zip: "33301" })),
     `#1 WH-GA zone 2 (expanded bundle ${BUNDLE})`,
   );
   assert.equal(wh[1].inventory[VITD].available, 8);
