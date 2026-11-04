@@ -1,0 +1,26 @@
+#2031 WH-NJ zone 1
+#2032 WH-GA zone 1
+#2033 WH-NJ zone 3 (normalized ZIP 2134 -> 02134)
+#2034 WH-GA zone 5
+#2035 WH-GA zone 4
+#2036 WH-NV zone 2
+#2037 PARTNER outside US
+#2038 WH-NV zone 4
+#2039 WH-NJ zone 1 (normalized ZIP 07030-1834 -> prefix 070)
+#2040 WH-GA zone 5 (expanded bundle NW-BNDL-ESS)
+#2041 WH-GA zone 7 (merged edit: added NW-MULTI-30 x1)
+#2042 PARTNER ZIP prefix 968 not in zones
+#2043 WH-NV zone 3
+#2044 WH-GA zone 6
+#2045 WH-GA zone 3 (normalized SKU nw-mag-90 -> NW-MAG-90)
+#2046 PARTNER no ZIP
+#2047 WH-GA zone 4
+#2048 WH-NJ zone 5
+#2049 WH-GA zone 4
+#2050 WH-NJ zone 5
+#2051 WH-NV zone 2
+#2052 WH-NV zone 5
+#2053 WH-NJ zone 2
+#2054 WH-GA zone 4
+#2055 WH-GA zone 8
+#2056 WH-GA zone 5 (expanded bundle NW-BNDL-ESS)
