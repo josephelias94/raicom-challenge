@@ -53,15 +53,14 @@ Days of cover uses available stock before the order reserves its own units.
 
 **No input validation.** I skipped it on purpose, because the brief says rough is fine and it keeps the code smaller to review. None of these cases occurs in this data, but a bad file would behave like this:
 
-- **Crashes with a generic `TypeError`:** an edit for an order that doesn't exist, a warehouse missing from `zones.json`, or an order with no `shipTo`. A crash prints nothing, so all routes are lost.
+- **Crashes with a generic `TypeError`:** an edit for an order that doesn't exist, a warehouse missing from `zones.json`, an order with no `shipTo`, an order with no `lines` key, or an order with no timestamp, unless it's first in the file, in which case it sorts last with no error. A crash prints nothing, so all routes are lost.
 - **No error, possibly wrong result:**
   - A duplicate order number drops the first order.
   - An unknown event type, such as a cancellation, is ignored.
   - A prefix missing at only one warehouse prints `zone undefined` or skips the zone comparison.
   - Zero velocity on an enabled warehouse gives it infinite cover, and a missing velocity skips the cover comparison.
   - A warehouse with no `available` value is skipped.
-  - A negative quantity adds stock, a zero quantity or an order with no lines still routes, and a missing quantity goes to PARTNER.
-  - A missing timestamp sorts the order last.
+  - A negative quantity adds stock, a zero quantity or an order with an empty `lines` list still routes, and a missing quantity goes to PARTNER.
   - A warehouse not in the priority list wins a full tie.
 - **Goes to PARTNER with a visible reason:** a lowercase country or a ZIP stored as a short string, such as `"2134"`.
 
@@ -77,4 +76,4 @@ If this ran in production, I'd add one validation step that throws a specific er
 
 **Ops notes.** `routes.txt` applies the rules to the files as given, so it ignores the ops notes. For example, it still routes five orders to WH-NV.
 
-**Editor types.** The project has no `@types/node`, to stay free of dependencies, so type checking can report `node:` imports as missing. This doesn't affect running the script.
+**Editor types.** The project has no `@types/node`, to stay free of dependencies, so type checking can report Node's built-in modules and globals as missing. This doesn't affect running the script.
