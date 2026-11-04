@@ -1,6 +1,6 @@
 # Order routing take-home
 
-`INSTRUCTIONS.md` is the only source of requirements, and the data lives in `natura-wellness-backend-test 2/`. Read only those files unless I point you at another one.
+`INSTRUCTIONS.md` is the only source of requirements, and the data lives in `data/`. Read only those files unless I point you at another one.
 
 # Language
 
