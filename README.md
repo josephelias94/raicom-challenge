@@ -31,6 +31,7 @@ Example output:
 | `router.test.ts` | Tests |
 | `routes.txt` | Output for the data as given |
 | `data/` | Input files and ops notes |
+| `ai-conversations/` | Exported AI conversations |
 
 ## Data handling
 
@@ -134,3 +135,10 @@ These come from the ops notes, and nothing in the data can confirm them:
 - **Priya:** Where does 420 orders a day come from? Which warehouses does the 30% assume, and does it check stock?
 - **Marco:** Can WH-NJ absorb the volume? Will WH-GA's magnesium last until Monday? It's about 3.5 days at current velocities, with no restock.
 - **Sean:** Why is WH-TX off? It has 500 of each product, but zero velocity gives it undefined cover, so that would need defining before it's turned on.
+
+## AI conversations
+
+I used two Claude Code sessions:
+
+- [`main-runner.txt`](ai-conversations/main-runner.txt): built the solution and prepared the Part B analysis.
+- [`auditor-overseer.txt`](ai-conversations/auditor-overseer.txt): reviewed that work independently and sent its findings to the first session.
